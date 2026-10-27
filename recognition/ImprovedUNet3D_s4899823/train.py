@@ -43,6 +43,7 @@ def train_one_epoch(model,loader,criterion,optimizer,device):
         loss = criterion(logits,labels)
         loss.backward()
         optimizer.step()
+        total_loss+=loss.item() * images.size(0)
 
     return total_loss/len(loader.dataset)
 
