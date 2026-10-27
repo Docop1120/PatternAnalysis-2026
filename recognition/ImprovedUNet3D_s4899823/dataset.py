@@ -135,9 +135,41 @@ def random_crop(img,lbl,size):
  
     sl = tuple(slice(st, st + s) for st, s in zip(start, size))
     return img[(slice(None),) + sl], lbl[sl]
+class HipMRIDataset2D(Dataset):
 
+    def __init__(self,pairs,scale=0.5,train=False,crop_size=None):
+        self.pairs = pairs
+        self.train = train
+        self.crop_size = tuple(crop_size) if crop_size else None
+        self.image,self.labels = [],[]
+        self.index = []
 
-class HipMRIDataset(Dataset):
+        for v,p in enumerate(pairs):
+            image,label = load_volume(p["image"]),load_volume(p["label"])
+            if image.shape != label.shape:
+                raise ValueError(f"Image and label shapes do not match for {p['scan']}: "
+                                 f"image:{image.shape} != label:{label.shape}")
+            img,lbl = preprocess(image,label,scale)
+            self.images.append(img)
+            self.labels.append(lbl.to(torch.vint8))
+            self.index.extend((v,z)forz in range(lbl.shape[-1]))
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, idx):
+        v,z = self.index[idx]
+        img = self.images[z][...,z]
+        lbl = self.labels[v][...,z].long()
+
+        if self.train:
+            imgl,lbl = augment(img,lbl)
+            if self.crop_size:
+                img,lbl = random_crop(img,lbl,self.crop_size)
+        p = self.pairs[v]
+        return {"image": img, "label": lbl, "scan": p["scan"], "case": p["case"], "slice": z}    
+
+class HipMRIDataset3D(Dataset):
     def __init__(self,pairs,scale = 0.5,train = False,crop_size =None,cache = False):
         self.pairs = pairs
         self.scale = scale
@@ -172,14 +204,17 @@ class HipMRIDataset(Dataset):
         return {"image": img, "label": lbl,"scan":self.pairs[idx]["scan"],"case":self.pairs[idx]["case"]}
 
 
-def get_dataloader(root=DEFAULT_ROOT,batch_size=1,scale=0.5,crop_size=None,num_workers=0,subset =0,seed = 42):
+def get_dataloader(root=DEFAULT_ROOT,dims =2,batch_size=1,scale=0.5,crop_size=None,num_workers=0,subset =0,seed = 42):
+    if dims not in(2,3):
+         raise ValueError("dims must be 2 or 3")
     split = patient_split(find_pairs(root),seed=seed)
     if subset:
         split = {k: v[:subset]for k,v in split.items()}
 
-    train_ds = HipMRIDataset(split["train"],scale=scale,train=True,crop_size=crop_size)
-    val_ds = HipMRIDataset(split["val"],scale=scale,train=False,crop_size=crop_size)
-    test_ds = HipMRIDataset(split["test"],scale=scale,train=False,crop_size=crop_size)
+    Ds = HipMRIDataset3D if dims == 2 else HipMRIDataset3D
+    train_ds = Ds(split["train"],scale=scale,train=True,crop_size=crop_size)
+    val_ds = Ds(split["val"],scale=scale,train=False,crop_size=crop_size)
+    test_ds = Ds(split["test"],scale=scale,train=False,crop_size=crop_size)
 
     loaders = {
         "train": DataLoader(train_ds,batch_size=batch_size,shuffle=True,num_workers=num_workers),
@@ -200,13 +235,16 @@ def audit(root, scale, subset):
     first = nib.load(pairs[0]["image"])
     print("Orientation (axis codes):", nib.aff2axcodes(first.affine))
  
-    ds = HipMRIDataset(split["train"][:subset] if subset else split["train"], scale=scale)
+    ds = HipMRIDataset3D(split["train"][:subset] if subset else split["train"], scale=scale)
     counts = torch.zeros(NUM_CLASSES)
     for i in range(len(ds)):
         img, lbl = ds.load(i)
         counts += torch.bincount(lbl.flatten(), minlength=NUM_CLASSES).float()
+        n_slices += lbl.shape[-1]
+        n_prostate_slice += int((lbl == PROSTATE).any(dim=0).any(dim=0).sum())
     print(f"Volume after scale={scale}: image {tuple(img.shape)}, label {tuple(lbl.shape)}")
-    print(f"Class voxel fractions over {len(ds)} training scans:")
+    print(f"2D slices: {n_slices} training slices of {tuple(lbl.shape[:2])}, "
+        f"{n_prostate_slice} ({100 * n_prostate_slice / n_slices:.1f}%) contain prostate")
     for name, frac in zip(CLASS_NAMES, counts / counts.sum()):
         print(f"  {name:10s} {100 * frac:6.2f}%")
 
