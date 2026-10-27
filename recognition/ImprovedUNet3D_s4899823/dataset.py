@@ -13,7 +13,7 @@ PROSTATE = 5
 DEFAULT_ROOT = (
     "data/2021-09-20_Dowling_Jason_51392v2/data/HipMRI_study_complete_release_v1")
 
-Scan_Re = re.compile(r"(Case_\d+)_(Week\d+)")
+Scan_Re = re.compile(r"([A-Za-z]+_?\d+)_(Week\d+)")
 
 #match every Mri image and labels to its own by using scan id.
 def find_pairs(root=DEFAULT_ROOT):
