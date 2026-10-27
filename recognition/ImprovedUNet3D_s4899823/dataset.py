@@ -141,7 +141,7 @@ class HipMRIDataset2D(Dataset):
         self.pairs = pairs
         self.train = train
         self.crop_size = tuple(crop_size) if crop_size else None
-        self.image,self.labels = [],[]
+        self.images,self.labels = [],[]
         self.index = []
 
         for v,p in enumerate(pairs):
@@ -151,19 +151,19 @@ class HipMRIDataset2D(Dataset):
                                  f"image:{image.shape} != label:{label.shape}")
             img,lbl = preprocess(image,label,scale)
             self.images.append(img)
-            self.labels.append(lbl.to(torch.vint8))
-            self.index.extend((v,z)forz in range(lbl.shape[-1]))
+            self.labels.append(lbl.to(torch.uint8))
+            self.index.extend((v,z)for z in range(lbl.shape[-1]))
 
     def __len__(self):
         return len(self.index)
 
     def __getitem__(self, idx):
         v,z = self.index[idx]
-        img = self.images[z][...,z]
+        img = self.images[v][...,z]
         lbl = self.labels[v][...,z].long()
 
         if self.train:
-            imgl,lbl = augment(img,lbl)
+            img,lbl = augment(img,lbl)
             if self.crop_size:
                 img,lbl = random_crop(img,lbl,self.crop_size)
         p = self.pairs[v]
@@ -211,7 +211,7 @@ def get_dataloader(root=DEFAULT_ROOT,dims =2,batch_size=1,scale=0.5,crop_size=No
     if subset:
         split = {k: v[:subset]for k,v in split.items()}
 
-    Ds = HipMRIDataset3D if dims == 2 else HipMRIDataset3D
+    Ds = HipMRIDataset2D if dims == 2 else HipMRIDataset3D
     train_ds = Ds(split["train"],scale=scale,train=True,crop_size=crop_size)
     val_ds = Ds(split["val"],scale=scale,train=False,crop_size=crop_size)
     test_ds = Ds(split["test"],scale=scale,train=False,crop_size=crop_size)
@@ -234,9 +234,10 @@ def audit(root, scale, subset):
  
     first = nib.load(pairs[0]["image"])
     print("Orientation (axis codes):", nib.aff2axcodes(first.affine))
- 
+   
     ds = HipMRIDataset3D(split["train"][:subset] if subset else split["train"], scale=scale)
     counts = torch.zeros(NUM_CLASSES)
+    n_slices = n_prostate_slice = 0
     for i in range(len(ds)):
         img, lbl = ds.load(i)
         counts += torch.bincount(lbl.flatten(), minlength=NUM_CLASSES).float()
@@ -245,6 +246,7 @@ def audit(root, scale, subset):
     print(f"Volume after scale={scale}: image {tuple(img.shape)}, label {tuple(lbl.shape)}")
     print(f"2D slices: {n_slices} training slices of {tuple(lbl.shape[:2])}, "
         f"{n_prostate_slice} ({100 * n_prostate_slice / n_slices:.1f}%) contain prostate")
+    print(f"Class voxel fractions over {len(ds)} training scans:")
     for name, frac in zip(CLASS_NAMES, counts / counts.sum()):
         print(f"  {name:10s} {100 * frac:6.2f}%")
 
