@@ -143,17 +143,17 @@ def main():
 
         with open(history_path,"w") as f:
             json.dump(history,f,indent=2)
-        peak_vram_gb = torch.cuda.max_memory_allocated() / 1024**3 if device.type == "cuda" else 0.0
-        summary = {
-        "dims": args.dims,
-        "params": count_parameters(model),
-        "best_prostate_dice": best_dice,
-        "mean_epoch_time_s": sum(history["epoch_time"]) / len(history["epoch_time"]),
-        "split": split,
-        }
-        with open(out_dir/f"summary_{args.dims}d.json","w") as f:
-            json.dump(summary,f,indent=2)
-        print(f"Done.Best prostate Dice {best_dice:.4f} | peak Vram {peak_vram_gb:.2f}GB")
+    peak_vram_gb = torch.cuda.max_memory_allocated() / 1024**3 if device.type == "cuda" else 0.0
+    summary = {
+    "dims": args.dims,
+    "params": count_parameters(model),
+    "best_prostate_dice": best_dice,
+    "mean_epoch_time_s": sum(history["epoch_time"]) / len(history["epoch_time"]),
+    "split": split,
+    }
+    with open(out_dir/f"summary_{args.dims}d.json","w") as f:
+        json.dump(summary,f,indent=2)
+    print(f"Done.Best prostate Dice {best_dice:.4f} | peak Vram {peak_vram_gb:.2f}GB")
 
 
 if __name__ == "__main__":
