@@ -2,18 +2,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def norm_block(channels):
-    return nn.Sequential(nn.InstanceNorm2d(channels,affine=True),
+
+
+def get_layers(dims):
+    if dims == 2 :
+        return  nn.Conv2d,nn.InstanceNorm2d,nn.Dropout2d
+    if dims == 3:
+        return nn.Conv3d, nn.InstanceNorm3d, nn.Dropout3d
+    raise ValueError(f"dims must be 2 or 3, got {dims}")
+        
+
+def norm_block(channels,dims =2 ):
+    _, Norm, _ = get_layers(dims)
+    return nn.Sequential(Norm(channels,affine=True),
                          nn.LeakyReLU(0.01,inplace=True)
                          )
-        
+
 # Preactivates residual block
 class ContextModule(nn.Module):
-    def __init__(self,channels,dropout_prob=0.3):
+    def __init__(self,channels,dropout_prob=0.3,dims = 2):
         super().__init__()
-        self.block = nn.Sequential(norm_block(channels),nn.Conv2d(channels,channels,kernel_size=3,padding=1, bias=False),
-                                   nn.Dropout2d(dropout_prob),norm_block(channels),
-                                   nn.Conv2d(channels,channels,kernel_size=3,padding=1, bias=False))
+        Conv,_,Dropout = get_layers(dims)
+        self.block = nn.Sequential(norm_block(channels,dims),Conv(channels,channels,kernel_size=3,padding=1, bias=False),
+                                   Dropout(dropout_prob),norm_block(channels,dims),
+                                   Conv(channels,channels,kernel_size=3,padding=1, bias=False))
 
 
     def forward(self,x):
@@ -21,9 +33,10 @@ class ContextModule(nn.Module):
 
 # Upsample to the nearest ,then a 3x3 conv that halves the channels
 class UpsampleModule(nn.Module):
-    def __init__(self,in_channels,out_channels):
+    def __init__(self,in_channels,out_channels,dims=2):
         super().__init__()
-        self.conv = nn.Sequential(norm_block(in_channels),nn.Conv2d(in_channels,out_channels,kernel_size=3,padding=1, bias=False))
+        Conv,_,_ = get_layers(dims)
+        self.conv = nn.Sequential(norm_block(in_channels,dims),Conv(in_channels,out_channels,kernel_size=3,padding=1, bias=False))
 
 
     def forward(self,x):
@@ -32,46 +45,47 @@ class UpsampleModule(nn.Module):
 
 #3x3 conv keeps channels then 1x1 conv
 class LocalizationModule(nn.Module):
-    def __init__(self,in_channels,out_channels):
+    def __init__(self,in_channels,out_channels,dims):
         super().__init__()
-        self.block = nn.Sequential(norm_block(in_channels),nn.Conv2d(in_channels,in_channels,kernel_size=3,padding=1,bias=False),
-                                   norm_block(in_channels),nn.Conv2d(in_channels,out_channels,kernel_size=1, bias=False))
+        Conv,_,_ = get_layers(dims)
+        self.block = nn.Sequential(norm_block(in_channels,dims),Conv(in_channels,in_channels,kernel_size=3,padding=1,bias=False),
+                                   norm_block(in_channels,dims),Conv(in_channels,out_channels,kernel_size=1, bias=False))
 
     def forward(self,x):
         return self.block(x)
 
+# Improved U-Net 2D or 3D
 
-#2D Improved U -net model
-
-class ImprovedUNet2D(nn.Module):
-    def __init__(self,in_channels=1,num_classes = 6,base_channels=16,dropout_prob=0.3):
+class ImprovedUNet(nn.Module):
+    def __init__(self,in_channels=1,num_classes = 6,base_channels=16,dropout_prob=0.3,dims=2):
         super().__init__()
         ch = [base_channels * (2 ** i) for i in range(5)]
-
+        self.dims = dims
+        Conv,_,_ = get_layers(dims)
         # encoder pathway
         # building 4 downsampling blocks
-        self.stem = nn.Conv2d(in_channels,ch[0],kernel_size=3,padding=1,bias=False)
-        self.down = nn.ModuleList([nn.Sequential(norm_block(ch[i - 1]),
-                          nn.Conv2d(ch[i - 1], ch[i], 3, stride=2, padding=1, bias=False)) for i in range(1, 5)])
+        self.stem = Conv(in_channels,ch[0],kernel_size=3,padding=1,bias=False)
+        self.down = nn.ModuleList([nn.Sequential(norm_block(ch[i - 1],dims),
+                          Conv(ch[i - 1], ch[i], 3, stride=2, padding=1, bias=False)) for i in range(1, 5)])
 
-        self.context = nn.ModuleList([ContextModule(c,dropout_prob=dropout_prob) for c in ch])
+        self.context = nn.ModuleList([ContextModule(c,dropout_prob=dropout_prob,dims=dims) for c in ch])
 
         # decoder pathway
         # building 4 upsampling blocks
-        self.up = nn.ModuleList([UpsampleModule(ch[i],ch[i-1]) for i in range(4,0,-1)])
-        self.local = nn.ModuleList([LocalizationModule(2*ch[i],ch[i]) for i in (3,2,1)])
-        self.final_conv = nn.Sequential(norm_block(2 * ch[0]), nn.Conv2d(2 * ch[0], 2*ch[0], kernel_size=3, padding=1, bias=False),
-                                        norm_block(2 * ch[0]))
+        self.up = nn.ModuleList([UpsampleModule(ch[i],ch[i-1],dims) for i in range(4,0,-1)])
+        self.local = nn.ModuleList([LocalizationModule(2*ch[i],ch[i],dims) for i in (3,2,1)])
+        self.final_conv = nn.Sequential(norm_block(2 * ch[0],dims), Conv(2 * ch[0], 2*ch[0], kernel_size=3, padding=1, bias=False),
+                                        norm_block(2 * ch[0],dims))
 
 
-        self.segmentation_2 = nn.Conv2d(ch[2], num_classes,kernel_size=1)
-        self.segmentation_1 = nn.Conv2d(ch[1], num_classes,kernel_size=1)
-        self.segmentation_0 = nn.Conv2d(2*ch[0], num_classes,kernel_size=1)
+        self.segmentation_2 = Conv(ch[2], num_classes,kernel_size=1)
+        self.segmentation_1 = Conv(ch[1], num_classes,kernel_size=1)
+        self.segmentation_0 = Conv(2*ch[0], num_classes,kernel_size=1)
 
-    @staticmethod
-    def upsample(x):
-        return F.interpolate(x,scale_factor=2,mode='bilinear',align_corners=False)
-
+    
+    def upsample(self,x):
+        mode = 'bilinear' if self.dims == 2 else 'trilinear'
+        return F.interpolate(x, scale_factor=2, mode=mode, align_corners=False)
     def forward(self,x):
         #keep output of each level as a skip connection
         skips = []
@@ -152,17 +166,14 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     torch.manual_seed(0)
- 
-    model = ImprovedUNet2D()
-    x = torch.randn(2, 1, 128, 128)
-    y = model(x)
-    print(f"ImprovedUNet2D: {tuple(x.shape)} -> {tuple(y.shape)}, "
-          f"{count_parameters(model):,} params")
- 
-    loss_fn = DiceCeLoss()
-    target = torch.randint(0, 6, (2, 128, 128))
-    loss = loss_fn(y, target)
-    loss.backward()
-    print(f"DiceCELoss on random data: {loss.item():.4f} (backward OK)")
-    print("Per-class Dice:", [round(v, 3) for v in dice_per_class(y, target).tolist()])
- 
+    for dims, shape in [(2,(2,1,128,128)),(3,(1,1,32,64,64))]:
+
+        model = ImprovedUNet(dims=dims)
+        x = torch.randn(*shape)
+        y = model(x)
+        print(f"{dims}D: {tuple(x.shape)} -> {tuple(y.shape)}, {count_parameters(model):,} params")
+        target = torch.randint(0, 6, (shape[0],) + shape[2:])
+        loss = DiceCeLoss()(y, target)
+        loss.backward()
+        print(f"  loss {loss.item():.4f} (backward OK)")
+        print("  per-class Dice:", [round(v, 3) for v in dice_per_class(y, target).tolist()])

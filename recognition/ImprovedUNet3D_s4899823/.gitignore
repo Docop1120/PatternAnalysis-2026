@@ -12,3 +12,4 @@ notebooks/
 *.nii.gz
 *.pt
 *.pth
+outputs_rangpur/
