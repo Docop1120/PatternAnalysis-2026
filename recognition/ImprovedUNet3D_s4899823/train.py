@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from dataset import get_dataloader
-from modules import ImprovedUNet2D,DiceCeLoss,dice_per_class,count_parameters
+from modules import ImprovedUNet,DiceCeLoss,dice_per_class,count_parameters
 
 CLASS_NAMES = ["background","body","bone","bladder","rectum","prostate"]
 
@@ -89,7 +89,7 @@ def main():
 
     loaders,split = get_dataloader(**loader_kwargs)
     if args.dims == 2:
-        model = ImprovedUNet2D(in_channels=1, num_classes=6).to(device)
+        model = ImprovedUNet(in_channels=1, num_classes=6).to(device)
     else:
         raise NotImplementedError("3D model comes in a later commit")
     print(f"Parameters: {count_parameters(model):,}")
@@ -106,7 +106,7 @@ def main():
     history_path = out_dir/f"history_{args.dims}d.json"
 
     if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats
+        torch.cuda.reset_peak_memory_stats()
     
 
     for epoch in range(args.epochs):
@@ -138,8 +138,8 @@ def main():
             saved = "  <- best, saved"
 
         dice_str = " ".join(f"{n}={d:.3f}" for n,d in zip(CLASS_NAMES,val_dice) )
-        print(f"Epoch {epoch}: train loss {train_loss:.4f}| val {val_loss:.4f} | {dice_str}|"
-             f"Ir{lr:.2e} |{epoch_time:.1f}s){saved}")
+        print(f"Epoch {epoch+1}/{args.epochs}: train loss {train_loss:.4f} | val {val_loss:.4f} | "
+              f"{dice_str} | lr {lr:.2e} | {epoch_time:.1f}s{saved}")
 
         with open(history_path,"w") as f:
             json.dump(history,f,indent=2)
@@ -148,6 +148,7 @@ def main():
     "dims": args.dims,
     "params": count_parameters(model),
     "best_prostate_dice": best_dice,
+    "peak_vram_gb": peak_vram_gb,
     "mean_epoch_time_s": sum(history["epoch_time"]) / len(history["epoch_time"]),
     "split": split,
     }
