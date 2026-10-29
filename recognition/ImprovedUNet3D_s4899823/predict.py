@@ -5,9 +5,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import numpy as np
+import torch.nn.functional as F
 
 from dataset import DEFAULT_ROOT, find_pairs, patient_split, HipMRIDataset3D
-from modules import ImprovedUNet2D
+from modules import ImprovedUNet
 
 
 CLASS_NAMES = ["background", "body", "bone", "bladder", "rectum", "prostate"]
@@ -30,13 +31,11 @@ def parse_args():
     return p.parse_args()
 
 def load_model(check_point_path, dims,device):
+
     check_point= torch.load(check_point_path,map_location=device,weights_only=False)
     if check_point["dims"] != dims:
         raise ValueError(f"Checkpoint is {check_point['dims']}")
-    if dims == 2:
-        model = ImprovedUNet2D(in_channels=1,num_classes=6)
-    else:
-        raise NotImplementedError("30 model comein a later commit")
+    model= ImprovedUNet(in_channels=1,num_classes=6,dims=dims)
 
     model.load_state_dict(check_point["model"])
     model.to(device).eval()
@@ -52,10 +51,21 @@ def predict_volume_2d(model,image,device,batch_size = 32):
     return torch.cat(preds).permute(1,2,0)    
 
 @torch.no_grad
+def predict_volume_3d(model,image,device,multiple=16):
+    x = image.unsqueeze(0).to(device)
+    H, W, D = x.shape[2:]
+    pad = [(-s) % multiple for s in (H, W, D)] 
+    x = F.pad(x, (0, pad[2], 0, pad[1], 0, pad[0]))
+    pred = model(x).argmax(dim=1)[0] 
+
+    return pred[:H, :W, :D].cpu()  
+
+
+@torch.no_grad
 def predict_volume(model, image, dims, device):
     if dims == 2:
         return predict_volume_2d(model, image, device)
-    raise NotImplementedError("3D prediction comes in a later commit")
+    return predict_volume_3d(model, image, device)
 
 
 # metrics

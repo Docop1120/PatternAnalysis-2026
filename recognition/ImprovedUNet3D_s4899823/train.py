@@ -88,10 +88,8 @@ def main():
         loader_kwargs["root"]= args.root
 
     loaders,split = get_dataloader(**loader_kwargs)
-    if args.dims == 2:
-        model = ImprovedUNet(in_channels=1, num_classes=6).to(device)
-    else:
-        raise NotImplementedError("3D model comes in a later commit")
+    model = ImprovedUNet(in_channels=1, num_classes=6, dims=args.dims).to(device)
+    
     print(f"Parameters: {count_parameters(model):,}")
 
     criterion = DiceCeLoss(num_classes=6)
