@@ -81,8 +81,9 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Device: {device}")
 
-    loader_kwargs = dict(dims=args.dims,batch_size = args.batch_size,
-                         num_workers = args.num_workers,subset=args.subset, seed=args.seed)
+    loader_kwargs = dict(dims=args.dims, batch_size=args.batch_size,
+                     num_workers=args.num_workers, subset=args.subset, seed=args.seed,
+                     crop_size=(128, 128, 64) if args.dims == 3 else None)
 
     if args.root is not None:
         loader_kwargs["root"]= args.root
